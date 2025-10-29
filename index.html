@@ -186,7 +186,7 @@
                     
                 }
 
-                // If shelter-specific fields exist, show them
+                // If shelter-specific fields exist, show only applicable hazard types (those marked 'Y')
                 function yn(val){
                     if (!val) return '-';
                     const v = String(val).trim().toUpperCase();
@@ -195,13 +195,24 @@
                     return val;
                 }
 
-                if ('forFlooding' in row || 'forFlooding' in row) {
-                    // prefer forFlooding field if present
-                    if (row.forFlooding !== undefined) info.push('水災避難: ' + yn(row.forFlooding));
+                // For shelters, collect only the hazards that are applicable (Y)
+                if (!isMedical) {
+                    const hazards = [];
+                    const isYes = v => {
+                        if (v === undefined || v === null) return false;
+                        const s = String(v).trim().toUpperCase();
+                        return s === 'Y' || s === 'YES' || s === 'TRUE' || s === '可';
+                    };
+                    if (isYes(row.forFlooding)) hazards.push('水災');
+                    if (isYes(row.forEarthquake)) hazards.push('地震');
+                    if (isYes(row.forMudslide)) hazards.push('土石流');
+                    if (isYes(row.forTsunami)) hazards.push('海嘯');
+
+                    if (hazards.length > 0) {
+                        info.push('適用避難類型: ' + hazards.join('、'));
+                    }
                 }
-                if (row.forEarthquake !== undefined) info.push('地震避難: ' + yn(row.forEarthquake));
-                if (row.forMudslide !== undefined) info.push('土石流避難: ' + yn(row.forMudslide));
-                if (row.forTsunami !== undefined) info.push('海嘯避難: ' + yn(row.forTsunami));
+
                 if (row.people !== undefined && row.people !== '') info.push('容納人數: ' + row.people);
 
                 const popupHtml = `<div style="font-size:13px"><div style="font-weight:700;color:${color};margin-bottom:4px">${title}</div>${info.join('<br>')}</div>`;
