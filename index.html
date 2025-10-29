@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="utf-8">
+    <title>Weather Visualization</title>
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+    
+    <!-- jQuery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <!-- (ECharts removed — this page now focuses on plotting CSV-based shelter/medical/water points) -->
+    <!-- Mapbox -->
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.js"></script>
+    <!-- PapaParse for CSV parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Segoe UI", "Noto Sans TC", sans-serif;
+        }
+
+        body {
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            background: #f9f9f9;
+        }
+
+        #mainChart {
+            flex: 1.6;
+            height: 100%;
+            border-right: 2px solid #e0e0e0;
+        }
+
+        #rightUpChart, #rightMiddleChart, #rightDown {
+            width: 100%;
+            height: 33.3%;
+            padding: 10px;
+        }
+
+        #rightDown {
+            display: flex;
+            gap: 10px;
+        }
+
+        #rightDown-left, #rightDown-right {
+            flex: 1;
+            height: 100%;
+            border-radius: 12px;
+            background-color: #ffffff;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+        }
+
+        #rightUpChart, #rightMiddleChart {
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+            margin-bottom: 10px;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background-color: rgba(0,0,0,0.2);
+            border-radius: 4px;
+        }
+
+        .map-title {
+            position: absolute;
+            top: 15px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.85);
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-weight: 600;
+            color: #A41623;
+            font-size: 16px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="mainChart">
+        <div class="map-title">Weather Stations Map</div>
+    </div>
+
+    <div style="flex: 1; display: flex; flex-direction: column; background: #f5f5f7; padding: 10px;">
+        <div id="rightUpChart"></div>
+        <div id="rightMiddleChart"></div>
+        <div id="rightDown">
+            <div id="rightDown-left"></div>
+            <div id="rightDown-right"></div>
+        </div>
+    </div>
+
+    <script>
+        // This page now focuses on plotting CSV-sourced points (避難為主題).
+        let map = null;
+
+        function loadCSV(path) {
+            console.log('Attempting to load CSV:', path);
+            return fetch(path)
+                .then(res => {
+                    if (!res.ok) throw new Error('Failed to fetch ' + path + ' (' + res.status + ')');
+                    return res.text();
+                })
+                .then(text => {
+                    try {
+                        const parsed = Papa.parse(text, { header: true, skipEmptyLines: true }).data;
+                        console.log(`Parsed ${parsed.length} rows from ${path}`);
+                        return parsed;
+                    } catch (e) {
+                        console.error('PapaParse error for', path, e);
+                        throw e;
+                    }
+                });
+        }
+
+        // Add markers from CSV rows. label chooses color & popup title.
+        function addCSVMarkers(rows, label) {
+            if (!map || !rows) return [];
+            const bounds = new mapboxgl.LngLatBounds();
+            rows.forEach(row => {
+                // Parse floats from common column names
+                let lng = parseFloat(row.lng || row.LNG || row.Long || row.longitude || '');
+                let lat = parseFloat(row.lat || row.LAT || row.Lat || row.latitude || '');
+
+                // If parsing yields NaN, try alternative columns or trimmed values
+                if (Number.isNaN(lng) && row.longitude) lng = parseFloat(row.longitude.trim());
+                if (Number.isNaN(lat) && row.latitude) lat = parseFloat(row.latitude.trim());
+
+                // Some CSVs have columns mislabeled: values may be in lat,lng order.
+                // Detect and swap when needed (e.g., latitude outside [-90,90] or longitude outside [-180,180]).
+                const isLatValid = !Number.isNaN(lat) && lat >= -90 && lat <= 90;
+                const isLngValid = !Number.isNaN(lng) && lng >= -180 && lng <= 180;
+                if (!isLatValid && isLngValid) {
+                    // maybe swapped
+                    console.warn('Detected invalid lat; attempting swap for row:', row);
+                    const maybeLat = lng;
+                    const maybeLng = lat;
+                    if (!Number.isNaN(maybeLat) && maybeLat >= -90 && maybeLat <= 90 && !Number.isNaN(maybeLng) && maybeLng >= -180 && maybeLng <= 180) {
+                        lat = maybeLat;
+                        lng = maybeLng;
+                        console.log('Swapped lat/lng for row — new lat:', lat, 'new lng:', lng);
+                    } else {
+                        // still invalid after swap — skip
+                        console.error('Invalid coordinates after swap attempt, skipping row:', row);
+                        return;
+                    }
+                }
+
+                // final validation
+                if (Number.isNaN(lng) || Number.isNaN(lat) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                    // skip invalid coordinates
+                    console.warn('Skipping row with invalid coordinates:', { lng, lat, row });
+                    return;
+                }
+
+                // color by label
+                let color = '#A41623'; // default (避難)
+                if (/醫療|hospital|clinic/i.test(label)) color = '#1f77b4';
+                if (/飲水|water/i.test(label)) color = '#2ca02c';
+
+                const marker = new mapboxgl.Marker({ color })
+                    .setLngLat([lng, lat])
+                    .addTo(map);
+
+                const title = row.name || row.number || row.address || label;
+                const info = [];
+                if (row.address) info.push('地址: ' + row.address);
+                if (row.phone || row.call) info.push('電話: ' + (row.phone || row.call));
+                if (row.openingHour) info.push('營業/開放: ' + row.openingHour);
+
+                const popupHtml = `<div style="font-size:13px"><div style="font-weight:700;color:${color};margin-bottom:4px">${title}</div>${info.join('<br>')}</div>`;
+                marker.setPopup(new mapboxgl.Popup({ offset: 12 }).setHTML(popupHtml));
+
+                bounds.extend([lng, lat]);
+            });
+            return bounds;
+        }
+
+        function createMapAndPlotCSV() {
+            mapboxgl.accessToken = 'pk.eyJ1IjoiYmlhYm9ibyIsImEiOiJjamVvejdlNXQxZnBuMndtdWhiZHRuaTNpIn0.PIS9wtUxm_rz_IzF2WFD1g';
+            map = new mapboxgl.Map({
+                container: 'mainChart',
+                style: 'mapbox://styles/mapbox/light-v11',
+                center: [121.6405, 25.0768],
+                zoom: 11
+            });
+            // Wait for map to be ready before adding markers
+            map.on('load', () => {
+                console.log('Map loaded — now loading CSVs');
+                Promise.all([
+                    loadCSV('ref/DaanMedical.csv'),
+                    loadCSV('ref/DaanShelter.csv'),
+                    loadCSV('ref/DaanWaterserver.csv')
+                ]).then(([med, shelter, water]) => {
+                    // We care about shelters primarily, but still show medical & water points with different colors.
+                    const boundsList = [];
+                    const b1 = addCSVMarkers(shelter, '避難收容');
+                    if (b1 && !b1.isEmpty()) boundsList.push(b1);
+                    const b2 = addCSVMarkers(med, '醫療機構');
+                    if (b2 && !b2.isEmpty()) boundsList.push(b2);
+                    const b3 = addCSVMarkers(water, '飲水站');
+                    if (b3 && !b3.isEmpty()) boundsList.push(b3);
+
+                    // Fit map to combined bounds if any markers exist
+                    if (boundsList.length > 0) {
+                        const combined = boundsList.reduce((acc, b) => acc.extend(b), boundsList[0]);
+                        map.fitBounds(combined, { padding: 40 });
+                    } else {
+                        console.warn('No marker bounds found — check parsed CSV rows and lng/lat columns');
+                    }
+                }).catch(err => console.error('CSV load error', err));
+            });
+        }
+
+        // Initialize map and plotting when page loads
+        document.addEventListener('DOMContentLoaded', createMapAndPlotCSV);
+    </script>
+</body>
+</html>
