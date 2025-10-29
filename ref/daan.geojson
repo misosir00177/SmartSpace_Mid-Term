@@ -1,0 +1,21 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "¤j¦w°Ï (fallback rectangle)" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [121.5250, 25.0000],
+            [121.5250, 25.0600],
+            [121.5650, 25.0600],
+            [121.5650, 25.0000],
+            [121.5250, 25.0000]
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -266,7 +266,11 @@
                 console.log('Map loaded — now loading CSVs');
 
                 // --- Daan district mask + highlight setup ---
-                const daanCoords = [[
+                // Try to fetch an accurate 大安區 polygon from Nominatim (OpenStreetMap)
+                const daanNominatimUrl = 'https://nominatim.openstreetmap.org/search.php?q=%E5%A4%A7%E5%AE%89%E5%8D%80+%E5%8F%B0%E5%8C%97&format=geojson&polygon_geojson=1';
+
+                // fallback rectangle if fetch fails
+                const fallbackCoords = [[
                     [121.5250, 25.0000],
                     [121.5250, 25.0600],
                     [121.5650, 25.0600],
@@ -274,53 +278,96 @@
                     [121.5250, 25.0000]
                 ]];
 
-                const daanPolygon = {
-                    type: 'Feature',
-                    properties: { name: '大安區' },
-                    geometry: { type: 'Polygon', coordinates: daanCoords }
-                };
+                fetch(daanNominatimUrl)
+                    .then(r => r.json())
+                    .then(geo => {
+                        try {
+                            const feat = geo.features && geo.features[0];
+                            let polygonCoords = fallbackCoords;
+                            if (feat && feat.geometry) {
+                                if (feat.geometry.type === 'MultiPolygon') polygonCoords = feat.geometry.coordinates[0];
+                                else polygonCoords = feat.geometry.coordinates;
+                            }
 
-                // world polygon outer ring
-                const worldOuter = [
-                    [-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90]
-                ];
-                const maskPolygon = {
-                    type: 'Feature',
-                    properties: {},
-                    geometry: { type: 'Polygon', coordinates: [worldOuter].concat(daanCoords) }
-                };
+                            const daanPolygon = {
+                                type: 'Feature',
+                                properties: { name: '大安區' },
+                                geometry: { type: 'Polygon', coordinates: polygonCoords }
+                            };
 
-                if (!map.getSource('daan-mask')) {
-                    map.addSource('daan-mask', { type: 'geojson', data: maskPolygon });
-                    map.addLayer({
-                        id: 'mask-fill',
-                        type: 'fill',
-                        source: 'daan-mask',
-                        layout: {},
-                        paint: {
-                            'fill-color': 'rgba(230,230,230,0.85)',
-                            'fill-opacity': 1
+                            // world polygon outer ring
+                            const worldOuter = [
+                                [-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90]
+                            ];
+                            const maskPolygon = {
+                                type: 'Feature',
+                                properties: {},
+                                geometry: { type: 'Polygon', coordinates: [worldOuter].concat(polygonCoords) }
+                            };
+
+                            if (!map.getSource('daan-mask')) {
+                                map.addSource('daan-mask', { type: 'geojson', data: maskPolygon });
+                                map.addLayer({
+                                    id: 'mask-fill',
+                                    type: 'fill',
+                                    source: 'daan-mask',
+                                    layout: {},
+                                    paint: {
+                                        'fill-color': 'rgba(230,230,230,0.85)',
+                                        'fill-opacity': 1
+                                    }
+                                });
+                            }
+
+                            if (!map.getSource('daan')) {
+                                map.addSource('daan', { type: 'geojson', data: daanPolygon });
+                                map.addLayer({
+                                    id: 'daan-fill',
+                                    type: 'fill',
+                                    source: 'daan',
+                                    layout: {},
+                                    paint: { 'fill-color': 'rgba(164,22,35,0.08)', 'fill-opacity': 1 }
+                                });
+                                map.addLayer({
+                                    id: 'daan-line',
+                                    type: 'line',
+                                    source: 'daan',
+                                    layout: { 'line-join': 'round', 'line-cap': 'round' },
+                                    paint: { 'line-color': '#A41623', 'line-width': 2, 'line-dasharray': [2,2] }
+                                });
+                            }
+                        } catch (e) {
+                            console.warn('Error applying fetched Daan geometry, falling back to rectangle', e);
                         }
+                    }).catch(err => {
+                        // fallback to rectangle if network fails
+                        console.warn('Failed to fetch Daan GeoJSON, using fallback rectangle', err);
+                        const polygonCoords = fallbackCoords;
+                        const daanPolygon = {
+                            type: 'Feature',
+                            properties: { name: '大安區' },
+                            geometry: { type: 'Polygon', coordinates: polygonCoords }
+                        };
+                        const worldOuter = [
+                            [-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90]
+                        ];
+                        const maskPolygon = {
+                            type: 'Feature',
+                            properties: {},
+                            geometry: { type: 'Polygon', coordinates: [worldOuter].concat(polygonCoords) }
+                        };
+                        try {
+                            if (!map.getSource('daan-mask')) {
+                                map.addSource('daan-mask', { type: 'geojson', data: maskPolygon });
+                                map.addLayer({ id: 'mask-fill', type: 'fill', source: 'daan-mask', layout: {}, paint: { 'fill-color': 'rgba(230,230,230,0.85)', 'fill-opacity': 1 } });
+                            }
+                            if (!map.getSource('daan')) {
+                                map.addSource('daan', { type: 'geojson', data: daanPolygon });
+                                map.addLayer({ id: 'daan-fill', type: 'fill', source: 'daan', layout: {}, paint: { 'fill-color': 'rgba(164,22,35,0.08)', 'fill-opacity': 1 } });
+                                map.addLayer({ id: 'daan-line', type: 'line', source: 'daan', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#A41623', 'line-width': 2, 'line-dasharray': [2,2] } });
+                            }
+                        } catch(e) { console.warn('fallback map layer error', e); }
                     });
-                }
-
-                if (!map.getSource('daan')) {
-                    map.addSource('daan', { type: 'geojson', data: daanPolygon });
-                    map.addLayer({
-                        id: 'daan-fill',
-                        type: 'fill',
-                        source: 'daan',
-                        layout: {},
-                        paint: { 'fill-color': 'rgba(164,22,35,0.08)', 'fill-opacity': 1 }
-                    });
-                    map.addLayer({
-                        id: 'daan-line',
-                        type: 'line',
-                        source: 'daan',
-                        layout: { 'line-join': 'round', 'line-cap': 'round' },
-                        paint: { 'line-color': '#A41623', 'line-width': 2, 'line-dasharray': [2,2] }
-                    });
-                }
 
                 // --- end Daan setup ---
 
