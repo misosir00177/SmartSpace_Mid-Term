@@ -8,6 +8,8 @@
     <!-- jQuery -->
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
     <!-- (ECharts removed — this page now focuses on plotting CSV-based shelter/medical/water points) -->
+    <!-- ECharts -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
     <!-- Mapbox -->
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet">
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.js"></script>
@@ -89,12 +91,21 @@
         <div class="map-title">避難資源地圖</div>
     </div>
 
-    <div style="flex: 1; display: flex; flex-direction: column; background: #f5f5f7; padding: 10px;">
-        <div id="rightUpChart"></div>
-        <div id="rightMiddleChart"></div>
-        <div id="rightDown">
-            <div id="rightDown-left"></div>
-            <div id="rightDown-right"></div>
+    <div style="flex: 1; display: flex; flex-direction: column; background: #f5f5f7; padding: 10px; gap:10px;">
+        <div style="padding:8px 12px;">
+            <h2 style="margin:0 0 8px 0;color:#2b6ea3;font-size:18px">避難資訊地圖</h2>
+            <label style="margin-right:10px"><input id="toggle-water" type="checkbox" checked> 飲水機</label>
+            <label style="margin-right:10px"><input id="toggle-shelter" type="checkbox" checked> 避難所</label>
+            <label style="margin-right:10px"><input id="toggle-med" type="checkbox" checked> 醫療院所</label>
+            <hr style="margin-top:8px;border:none;border-top:1px solid #e6eef6">
+        </div>
+
+        <div id="rightUpChart" style="height:220px;"></div>
+
+        <div id="rightMiddleChart" style="height:120px;padding:12px;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"></div>
+
+        <div id="rightDown" style="display:flex;gap:10px;">
+            <div id="rightDown-chart" style="flex:1;height:220px;padding:12px;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"></div>
         </div>
     </div>
 
@@ -121,7 +132,11 @@
                 });
         }
 
-        // Add markers from CSV rows. label chooses color & popup title.
+    // Add markers from CSV rows. label chooses color & popup title.
+    // This function now also stores markers in global arrays so they can be toggled on/off.
+    const markerStore = { shelter: [], med: [], water: [] };
+    // dataStore keeps pairs of { row, marker } so UI lists can access marker for flyTo/openPopup
+    const dataStore = { shelter: [], med: [], water: [] };
         function addCSVMarkers(rows, label) {
             if (!map || !rows) return [];
             const bounds = new mapboxgl.LngLatBounds();
@@ -217,8 +232,12 @@
 
                 const popupHtml = `<div style="font-size:13px"><div style="font-weight:700;color:${color};margin-bottom:4px">${title}</div>${info.join('<br>')}</div>`;
                 marker.setPopup(new mapboxgl.Popup({ offset: 12 }).setHTML(popupHtml));
-
                 bounds.extend([lng, lat]);
+
+                // store marker and row for toggling & UI
+                const key = /醫療|hospital|clinic/i.test(label) ? 'med' : (/飲水|water/i.test(label) ? 'water' : 'shelter');
+                markerStore[key].push(marker);
+                dataStore[key].push({ row: row, marker: marker });
             });
             return bounds;
         }
@@ -315,8 +334,201 @@
                     } else {
                         console.warn('No marker bounds found — check parsed CSV rows and lng/lat columns');
                     }
+
+                            // render charts & setup UI
+                            try {
+                                renderRightPanelCharts(med, shelter, water);
+                                setupLayerToggles();
+                                // render shelter list (uses dataStore populated by addCSVMarkers)
+                                renderShelterList();
+                            } catch (e) { console.error('Error rendering right panel', e); }
                 }).catch(err => console.error('CSV load error', err));
             });
+        }
+
+        // Render the right-side charts and cards using ECharts + HTML
+        function renderRightPanelCharts(med, shelter, water) {
+            // RightUpChart: shelter capacity (top 5)
+            try {
+                const parsed = shelter.map(r => ({
+                    name: r.name || r.number || (r.address ? r.address.split(',')[0] : '避難所'),
+                    people: parseInt(String(r.people || '0').replace(/,/g, '')) || 0
+                })).sort((a, b) => b.people - a.people).slice(0, 6);
+
+                const upChart = echarts.init(document.getElementById('rightUpChart'));
+                const upOption = {
+                    title: { text: '避難所收容人數', left: 'center', textStyle: { color: '#A41623' } },
+                    tooltip: {},
+                    xAxis: { type: 'category', data: parsed.map(p => p.name), axisLabel: { rotate: 30 } },
+                    yAxis: { type: 'value' },
+                    series: [{ type: 'bar', data: parsed.map(p => p.people), itemStyle: { color: '#FFB081' } }]
+                };
+                upChart.setOption(upOption);
+                // interactive: click a bar to focus the map on that shelter
+                upChart.off('click');
+                upChart.on('click', params => {
+                    try {
+                        const name = params.name;
+                        // find shelter in dataStore by matching name/address/number
+                        const found = dataStore.shelter.find(d => {
+                            const r = d.row;
+                            const candidate = (r.name || r.number || (r.address ? r.address.split(',')[0] : '')).toString();
+                            return candidate === name || candidate.indexOf(name) !== -1 || name.indexOf(candidate) !== -1;
+                        });
+                        if (found) {
+                            showShelterDetails(found.row, found.marker);
+                        }
+                    } catch (e) { console.warn('upChart click handler', e); }
+                });
+            } catch (e) { console.warn('shelter chart error', e); }
+
+            // RightMiddleChart: shelter open status card (show largest shelter)
+            try {
+                const largest = shelter.slice().sort((a,b)=> (parseInt(String(b.people||'0').replace(/,/g,''))||0) - (parseInt(String(a.people||'0').replace(/,/g,''))||0))[0];
+                const card = document.getElementById('rightMiddleChart');
+                if (largest) {
+                    const name = largest.name || largest.number || largest.address || '避難所';
+                    let status = '尚未提供';
+                    const oh = largest.openingHour || '';
+                    if (/24:00|00:00|24小時|0:00|24時/.test(oh)) status = '開放中';
+                    else if (oh && oh.length>0) status = '依時段開放';
+                    else status = '尚未開放';
+
+                    card.innerHTML = `
+                        <div style="font-weight:700;color:#FF8A65;margin-bottom:6px">避難所開放狀況</div>
+                        <div style="font-size:15px;font-weight:600">${name}</div>
+                        <div style="margin-top:8px">狀況： <span style="color:${status==='開放中'? '#2ca02c':'#d9534f'};font-weight:700">${status}</span></div>
+                    `;
+                } else {
+                    card.innerHTML = '<div>無避難所資料</div>';
+                }
+            } catch(e){ console.warn('status card error', e); }
+
+            // RightDown-left: medical hospital bed counts (bar chart)
+            try {
+                const medParsed = med.map(r => ({
+                    name: r.placeName || (r.address ? r.address.split(',')[0] : '醫療'),
+                    normal: parseInt(String(r.normalBed||'0').replace(/,/g,'')) || 0,
+                    icu: parseInt(String(r.icuBed||'0').replace(/,/g,'')) || 0
+                })).sort((a,b)=> b.normal - a.normal).slice(0,6);
+
+                const medChart = echarts.init(document.getElementById('rightDown-chart'));
+                const medOption = {
+                    title: { text: '醫療院所病床數', left: 'center', textStyle:{ color:'#1f7fb4' } },
+                    tooltip: { },
+                    legend: { data: ['一般病床','加護病床'], bottom: 0 },
+                    xAxis: { type: 'category', data: medParsed.map(m=>m.name), axisLabel:{rotate:30} },
+                    yAxis: { type: 'value' },
+                    series: [
+                        { name: '一般病床', type: 'bar', data: medParsed.map(m=>m.normal), itemStyle:{ color:'#66c2a5'} },
+                        { name: '加護病床', type: 'bar', data: medParsed.map(m=>m.icu), itemStyle:{ color:'#2ca02c'} }
+                    ]
+                };
+                medChart.setOption(medOption);
+            } catch(e){ console.warn('medical chart error', e); }
+        }
+
+        // Show shelter details in the right-middle card and open popup + pan map
+        function showShelterDetails(row, marker) {
+            const card = document.getElementById('rightMiddleChart');
+            const name = row.name || row.number || row.address || '避難所';
+            const address = row.address || '-';
+            const people = row.people || '-';
+            const opening = row.openingHour || '-';
+            const hazards = [];
+            const isYes = v => { if (v === undefined || v === null) return false; const s = String(v).trim().toUpperCase(); return s==='Y'||s==='YES'||s==='TRUE'||s==='可'; };
+            if (isYes(row.forFlooding)) hazards.push('水災');
+            if (isYes(row.forEarthquake)) hazards.push('地震');
+            if (isYes(row.forMudslide)) hazards.push('土石流');
+            if (isYes(row.forTsunami)) hazards.push('海嘯');
+
+            card.innerHTML = `
+                <div style="font-weight:700;color:#FF8A65;margin-bottom:6px">避難所詳細</div>
+                <div style="font-size:15px;font-weight:700">${name}</div>
+                <div style="margin-top:6px">地址: ${address}</div>
+                <div>容納人數: ${people}</div>
+                <div>開放時間: ${opening}</div>
+                <div>適用避難類型: ${hazards.length>0?hazards.join('、'):'無特別標示'}</div>
+            `;
+
+            // open popup and fly to marker if available
+            try {
+                if (marker) {
+                    marker.togglePopup();
+                    const lnglat = marker.getLngLat();
+                    map.flyTo({ center: [lnglat.lng, lnglat.lat], zoom: 15 });
+                }
+            } catch (e) { console.warn('showShelterDetails error', e); }
+        }
+
+        // Render shelter list with search and hazard filter
+        function renderShelterList() {
+            const container = document.getElementById('rightDown-right');
+            if (!container) return;
+            const data = dataStore.shelter.slice().map(d=>d);
+
+            // build controls
+            container.innerHTML = `
+                <div style="font-weight:700;color:#F39C12;margin-bottom:6px">避難所列表（依容納人數）</div>
+                <div style="margin-bottom:6px"><input id="shelter-search" placeholder="搜尋名稱或地址" style="width:60%;padding:6px;border:1px solid #e6eef6;border-radius:6px" /> <label style="margin-left:6px"><input id="filter-flood" type="checkbox"> 只顯示支援水災</label></div>
+                <div id="shelter-list" style="max-height:220px;overflow:auto;padding-right:6px"></div>
+            `;
+
+            const listEl = document.getElementById('shelter-list');
+            const searchEl = document.getElementById('shelter-search');
+            const filterFlood = document.getElementById('filter-flood');
+
+            function renderList() {
+                const q = (searchEl.value||'').trim().toLowerCase();
+                const onlyFlood = filterFlood.checked;
+                // map to objects with row and marker and numeric people
+                const rows = data.map(d => ({ row: d.row, marker: d.marker, people: parseInt(String(d.row.people||'0').replace(/,/g,''))||0 }));
+                let filtered = rows.filter(r => {
+                    if (onlyFlood) {
+                        const v = String(r.row.forFlooding||'').trim().toUpperCase();
+                        if (!(v==='Y' || v==='YES' || v==='TRUE' || v==='可')) return false;
+                    }
+                    if (!q) return true;
+                    const name = (r.row.name||r.row.number||r.row.address||'').toString().toLowerCase();
+                    return name.indexOf(q) !== -1;
+                });
+                filtered.sort((a,b)=> b.people - a.people);
+
+                listEl.innerHTML = '';
+                filtered.forEach(item => {
+                    const name = item.row.name || item.row.number || (item.row.address?item.row.address.split(',')[0]:'避難所');
+                    const li = document.createElement('div');
+                    li.style.padding = '8px';
+                    li.style.borderBottom = '1px solid #f0f4f8';
+                    li.style.cursor = 'pointer';
+                    li.innerHTML = `<div style="font-weight:700">${name}</div><div style="font-size:12px;color:#666">容納: ${item.people}</div>`;
+                    li.addEventListener('click', ()=> showShelterDetails(item.row, item.marker));
+                    listEl.appendChild(li);
+                });
+            }
+
+            searchEl.addEventListener('input', renderList);
+            filterFlood.addEventListener('change', renderList);
+            renderList();
+        }
+
+        // Setup checkbox toggles to show/hide marker groups
+        function setupLayerToggles(){
+            const toggle = (id, key)=>{
+                const cb = document.getElementById(id);
+                if(!cb) return;
+                cb.addEventListener('change', ()=>{
+                    const visible = cb.checked;
+                    markerStore[key].forEach(m=>{
+                        try{
+                            if(visible) m.addTo(map); else m.remove();
+                        }catch(e){console.warn('marker toggle error',e)}
+                    });
+                });
+            };
+            toggle('toggle-water','water');
+            toggle('toggle-shelter','shelter');
+            toggle('toggle-med','med');
         }
 
         // Initialize map and plotting when page loads
