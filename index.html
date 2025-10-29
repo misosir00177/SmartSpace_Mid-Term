@@ -37,12 +37,15 @@
             border-right: 2px solid #e0e0e0;
         }
 
-        #rightUpChart, #rightMiddleChart, #rightDown {
+        #rightUpChart, #rightDown {
             width: 100%;
-            height: 33.3%;
             padding: 10px;
         }
 
+        /* give more vertical room to the top chart and allow the bottom panel to expand */
+        #rightUpChart { height: 260px; }
+        #rightDown { flex: 1; }
+        #rightDown-chart { height: 100%; }
         #rightDown {
             display: flex;
             gap: 10px;
@@ -56,7 +59,7 @@
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
         }
 
-        #rightUpChart, #rightMiddleChart {
+        #rightUpChart {
             background-color: #ffffff;
             border-radius: 12px;
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
@@ -100,12 +103,10 @@
             <hr style="margin-top:8px;border:none;border-top:1px solid #e6eef6">
         </div>
 
-        <div id="rightUpChart" style="height:220px;"></div>
-
-        <div id="rightMiddleChart" style="height:120px;padding:12px;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"></div>
+        <div id="rightUpChart"></div>
 
         <div id="rightDown" style="display:flex;gap:10px;">
-            <div id="rightDown-chart" style="flex:1;height:220px;padding:12px;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"></div>
+            <div id="rightDown-chart" style="flex:1;padding:12px;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"></div>
         </div>
     </div>
 
@@ -176,7 +177,7 @@
                     return;
                 }
 
-                // color by label
+                //SECTION color by label
                 let color = '#2ca02c'; // default (避難)
                 if (/醫療|hospital|clinic/i.test(label)) color = '#A41623';
                 if (/飲水|water/i.test(label)) color = '#1f77b4';
@@ -184,6 +185,16 @@
                 const marker = new mapboxgl.Marker({ color })
                     .setLngLat([lng, lat])
                     .addTo(map);
+
+                // wire marker click to show details and update comparison chart
+                try {
+                    const el = marker.getElement();
+                    el.addEventListener('click', (e) => {
+                        // call details + comparison
+                        showShelterDetails(row, marker);
+                        try { updateComparisonChart(row); } catch(err){console.warn(err)}
+                    });
+                } catch (e) { /* ignore if can't attach */ }
 
                 const isMedical = /醫療|hospital|clinic/i.test(label);
                 const title = isMedical ? (row.placeName || row.name || row.address || label) : (row.name || row.number || row.address || label || '地點');
@@ -350,12 +361,17 @@
         function renderRightPanelCharts(med, shelter, water) {
             // RightUpChart: shelter capacity (top 5)
             try {
-                const parsed = shelter.map(r => ({
-                    name: r.name || r.number || (r.address ? r.address.split(',')[0] : '避難所'),
-                    people: parseInt(String(r.people || '0').replace(/,/g, '')) || 0
-                })).sort((a, b) => b.people - a.people).slice(0, 6);
+                // store parsed shelter data globally so we can update the chart on interactions
+                window._shelterChartData = shelter.map(r => ({
+                        name: r.name || r.number || (r.address ? r.address.split(',')[0] : '避難所'),
+                        people: parseInt(String(r.people || '0').replace(/,/g, '')) || 0,
+                        _row: r
+                    })).sort((a, b) => b.people - a.people);
 
-                const upChart = echarts.init(document.getElementById('rightUpChart'));
+                    // initialize top chart and save reference globally for updates
+                    window.charts = window.charts || {};
+                    const upChart = echarts.init(document.getElementById('rightUpChart'));
+                    window.charts.upChart = upChart;
                 const upOption = {
                     title: { text: '避難所收容人數', left: 'center', textStyle: { color: '#A41623' } },
                     tooltip: {},
@@ -364,45 +380,10 @@
                     series: [{ type: 'bar', data: parsed.map(p => p.people), itemStyle: { color: '#FFB081' } }]
                 };
                 upChart.setOption(upOption);
-                // interactive: click a bar to focus the map on that shelter
-                upChart.off('click');
-                upChart.on('click', params => {
-                    try {
-                        const name = params.name;
-                        // find shelter in dataStore by matching name/address/number
-                        const found = dataStore.shelter.find(d => {
-                            const r = d.row;
-                            const candidate = (r.name || r.number || (r.address ? r.address.split(',')[0] : '')).toString();
-                            return candidate === name || candidate.indexOf(name) !== -1 || name.indexOf(candidate) !== -1;
-                        });
-                        if (found) {
-                            showShelterDetails(found.row, found.marker);
-                        }
-                    } catch (e) { console.warn('upChart click handler', e); }
-                });
             } catch (e) { console.warn('shelter chart error', e); }
 
-            // RightMiddleChart: shelter open status card (show largest shelter)
-            try {
-                const largest = shelter.slice().sort((a,b)=> (parseInt(String(b.people||'0').replace(/,/g,''))||0) - (parseInt(String(a.people||'0').replace(/,/g,''))||0))[0];
-                const card = document.getElementById('rightMiddleChart');
-                if (largest) {
-                    const name = largest.name || largest.number || largest.address || '避難所';
-                    let status = '尚未提供';
-                    const oh = largest.openingHour || '';
-                    if (/24:00|00:00|24小時|0:00|24時/.test(oh)) status = '開放中';
-                    else if (oh && oh.length>0) status = '依時段開放';
-                    else status = '尚未開放';
-
-                    card.innerHTML = `
-                        <div style="font-weight:700;color:#FF8A65;margin-bottom:6px">避難所開放狀況</div>
-                        <div style="font-size:15px;font-weight:600">${name}</div>
-                        <div style="margin-top:8px">狀況： <span style="color:${status==='開放中'? '#2ca02c':'#d9534f'};font-weight:700">${status}</span></div>
-                    `;
-                } else {
-                    card.innerHTML = '<div>無避難所資料</div>';
-                }
-            } catch(e){ console.warn('status card error', e); }
+            // Middle status panel removed — no inline status card. Keep console info for debugging.
+            try { console.debug('renderRightPanelCharts: shelter count', shelter.length); } catch(e){console.warn(e)}
 
             // RightDown-left: medical hospital bed counts (bar chart)
             try {
@@ -414,44 +395,103 @@
 
                 const medChart = echarts.init(document.getElementById('rightDown-chart'));
                 const medOption = {
-                    title: { text: '醫療院所病床數', left: 'center', textStyle:{ color:'#1f7fb4' } },
+                    title: { text: '醫療院所病床數', left: 'center', textStyle:{ color:'#A41623' } },
                     tooltip: { },
                     legend: { data: ['一般病床','加護病床'], bottom: 0 },
                     xAxis: { type: 'category', data: medParsed.map(m=>m.name), axisLabel:{rotate:30} },
                     yAxis: { type: 'value' },
                     series: [
-                        { name: '一般病床', type: 'bar', data: medParsed.map(m=>m.normal), itemStyle:{ color:'#66c2a5'} },
-                        { name: '加護病床', type: 'bar', data: medParsed.map(m=>m.icu), itemStyle:{ color:'#2ca02c'} }
+                        { name: '一般病床', type: 'bar', data: medParsed.map(m=>m.normal), itemStyle:{ color:'#A41623'} },
+                        { name: '加護病床', type: 'bar', data: medParsed.map(m=>m.icu), itemStyle:{ color:'#A416FF'} }
                     ]
                 };
                 medChart.setOption(medOption);
             } catch(e){ console.warn('medical chart error', e); }
+
+            // When charts are first rendered, ensure the top chart shows default ordering
+            try { if (window.charts && window.charts.upChart) {
+                // default: show top 6 shelters
+                updateComparisonChart();
+            }} catch(e){console.warn(e)}
+        }
+
+        // Update the top chart to compare a selected shelter against others.
+        // If selectedRow is undefined, show the default top N list.
+        function updateComparisonChart(selectedRow) {
+            try {
+                const upChart = window.charts && window.charts.upChart;
+                if (!upChart || !window._shelterChartData) return;
+
+                const all = window._shelterChartData.slice();
+                const selectedName = (selectedRow && (selectedRow.name || selectedRow.number || selectedRow.address)) || null;
+
+                // If a specific row is selected, put it first and then top others (excluding it)
+                let list = [];
+                if (selectedName) {
+                    const sel = all.find(a => {
+                        const rname = String(a._row.name || a._row.number || a._row.address || '').toString();
+                        return rname && rname.indexOf(selectedName) !== -1 || selectedName.indexOf(rname) !== -1;
+                    }) || all.find(a => String(a._row.name||'') === selectedName);
+                    if (sel) {
+                        list.push(sel);
+                        // add next top 5 others
+                        const others = all.filter(a => a !== sel).slice(0,5);
+                        list = list.concat(others);
+                    } else {
+                        // fallback to default
+                        list = all.slice(0,6);
+                    }
+                } else {
+                    list = all.slice(0,6);
+                }
+
+                const names = list.map(l => l.name);
+                const values = list.map(l => l.people);
+
+                // color first bar differently if it's the selected one
+                const colors = list.map((l, idx) => idx===0 && selectedName ? '#2fa01a' : '#7aff7a');
+
+                const option = {
+                    title: { text: '避難所收容人數（比較）', left: 'center', textStyle: { color: '#2ca02c' } },
+                    tooltip: {},
+                    xAxis: { type: 'category', data: names, axisLabel: { rotate: 30 } },
+                    yAxis: { type: 'value' },
+                    series: [{ type: 'bar', data: values, itemStyle: { color: function(params){ return colors[params.dataIndex]; } } }]
+                };
+                upChart.setOption(option, true);
+                // store currently-displayed data so clicks can map back to rows
+                window.charts = window.charts || {};
+                window.charts.upChartData = list;
+
+                // attach click handler: use dataIndex to find the clicked shelter and fly to it
+                try {
+                    upChart.off('click');
+                    upChart.on('click', params => {
+                        try {
+                            const idx = params.dataIndex;
+                            const item = window.charts.upChartData && window.charts.upChartData[idx];
+                            if (!item) return;
+                            // find marker for this row
+                            const entry = dataStore.shelter.find(d => d.row === item._row);
+                            if (entry) {
+                                showShelterDetails(entry.row, entry.marker);
+                            } else {
+                                // fallback: show details without marker
+                                showShelterDetails(item._row, null);
+                            }
+                            // re-render chart centered on this selection
+                            try { updateComparisonChart(item._row); } catch(e){/* ignore */}
+                        } catch (e) { console.warn('upChart click inner', e); }
+                    });
+                } catch(e){ console.warn('attach upChart click', e); }
+            } catch (e) { console.warn('updateComparisonChart error', e); }
         }
 
         // Show shelter details in the right-middle card and open popup + pan map
         function showShelterDetails(row, marker) {
-            const card = document.getElementById('rightMiddleChart');
+            // Middle status card removed — show details via marker popup and flyTo instead.
             const name = row.name || row.number || row.address || '避難所';
-            const address = row.address || '-';
-            const people = row.people || '-';
-            const opening = row.openingHour || '-';
-            const hazards = [];
-            const isYes = v => { if (v === undefined || v === null) return false; const s = String(v).trim().toUpperCase(); return s==='Y'||s==='YES'||s==='TRUE'||s==='可'; };
-            if (isYes(row.forFlooding)) hazards.push('水災');
-            if (isYes(row.forEarthquake)) hazards.push('地震');
-            if (isYes(row.forMudslide)) hazards.push('土石流');
-            if (isYes(row.forTsunami)) hazards.push('海嘯');
-
-            card.innerHTML = `
-                <div style="font-weight:700;color:#FF8A65;margin-bottom:6px">避難所詳細</div>
-                <div style="font-size:15px;font-weight:700">${name}</div>
-                <div style="margin-top:6px">地址: ${address}</div>
-                <div>容納人數: ${people}</div>
-                <div>開放時間: ${opening}</div>
-                <div>適用避難類型: ${hazards.length>0?hazards.join('、'):'無特別標示'}</div>
-            `;
-
-            // open popup and fly to marker if available
+            console.debug('showShelterDetails for', name);
             try {
                 if (marker) {
                     marker.togglePopup();
@@ -502,7 +542,10 @@
                     li.style.borderBottom = '1px solid #f0f4f8';
                     li.style.cursor = 'pointer';
                     li.innerHTML = `<div style="font-weight:700">${name}</div><div style="font-size:12px;color:#666">容納: ${item.people}</div>`;
-                    li.addEventListener('click', ()=> showShelterDetails(item.row, item.marker));
+                    li.addEventListener('click', ()=>{
+                        showShelterDetails(item.row, item.marker);
+                        try { updateComparisonChart(item.row); } catch(e){console.warn(e)}
+                    });
                     listEl.appendChild(li);
                 });
             }
