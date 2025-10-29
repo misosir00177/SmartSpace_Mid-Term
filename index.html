@@ -234,6 +234,66 @@
             // Wait for map to be ready before adding markers
             map.on('load', () => {
                 console.log('Map loaded — now loading CSVs');
+
+                // --- Daan district mask + highlight setup ---
+                const daanCoords = [[
+                    [121.5250, 25.0000],
+                    [121.5250, 25.0600],
+                    [121.5650, 25.0600],
+                    [121.5650, 25.0000],
+                    [121.5250, 25.0000]
+                ]];
+
+                const daanPolygon = {
+                    type: 'Feature',
+                    properties: { name: '大安區' },
+                    geometry: { type: 'Polygon', coordinates: daanCoords }
+                };
+
+                // world polygon outer ring
+                const worldOuter = [
+                    [-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90]
+                ];
+                const maskPolygon = {
+                    type: 'Feature',
+                    properties: {},
+                    geometry: { type: 'Polygon', coordinates: [worldOuter].concat(daanCoords) }
+                };
+
+                if (!map.getSource('daan-mask')) {
+                    map.addSource('daan-mask', { type: 'geojson', data: maskPolygon });
+                    map.addLayer({
+                        id: 'mask-fill',
+                        type: 'fill',
+                        source: 'daan-mask',
+                        layout: {},
+                        paint: {
+                            'fill-color': 'rgba(230,230,230,0.85)',
+                            'fill-opacity': 1
+                        }
+                    });
+                }
+
+                if (!map.getSource('daan')) {
+                    map.addSource('daan', { type: 'geojson', data: daanPolygon });
+                    map.addLayer({
+                        id: 'daan-fill',
+                        type: 'fill',
+                        source: 'daan',
+                        layout: {},
+                        paint: { 'fill-color': 'rgba(164,22,35,0.08)', 'fill-opacity': 1 }
+                    });
+                    map.addLayer({
+                        id: 'daan-line',
+                        type: 'line',
+                        source: 'daan',
+                        layout: { 'line-join': 'round', 'line-cap': 'round' },
+                        paint: { 'line-color': '#A41623', 'line-width': 2, 'line-dasharray': [2,2] }
+                    });
+                }
+
+                // --- end Daan setup ---
+
                 Promise.all([
                     loadCSV('ref/DaanMedical.csv'),
                     loadCSV('ref/DaanShelter.csv'),
