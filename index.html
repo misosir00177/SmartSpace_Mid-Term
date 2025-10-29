@@ -170,8 +170,9 @@
                     .setLngLat([lng, lat])
                     .addTo(map);
 
-                const title = row.name || row.number || row.address || label;
+                const title = row.name || "避難所" || row.address || label;
                 const info = [];
+                info.push('類型: ' + label);
                 if (row.address) info.push('地址: ' + row.address);
                 if (row.phone || row.call) info.push('電話: ' + (row.phone || row.call));
                 if (row.openingHour) info.push('營業/開放: ' + row.openingHour);
@@ -206,7 +207,7 @@
                     if (b1 && !b1.isEmpty()) boundsList.push(b1);
                     const b2 = addCSVMarkers(med, '醫療機構');
                     if (b2 && !b2.isEmpty()) boundsList.push(b2);
-                    const b3 = addCSVMarkers(water, '飲水站');
+                    const b3 = addCSVMarkers(water, '飲水機');
                     if (b3 && !b3.isEmpty()) boundsList.push(b3);
 
                     // Fit map to combined bounds if any markers exist
