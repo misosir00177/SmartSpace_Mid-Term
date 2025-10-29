@@ -170,12 +170,21 @@
                     .setLngLat([lng, lat])
                     .addTo(map);
 
-                const title = row.name || row.name || row.address || label;
+                const isMedical = /醫療|hospital|clinic/i.test(label);
+                const title = isMedical ? (row.placeName || row.name || row.address || label) : (row.name || row.number || row.address || label || '地點');
                 const info = [];
                 info.push('類型: ' + label);
                 if (row.address) info.push('地址: ' + row.address);
+                // phone may be present for both medical and other datasets
                 if (row.phone || row.call) info.push('電話: ' + (row.phone || row.call));
                 if (row.openingHour) info.push('營業/開放: ' + row.openingHour);
+
+                // Medical-specific fields: normalBed, icuBed, placeName
+                if (isMedical) {
+                    if (row.normalBed !== undefined && row.normalBed !== '') info.push('一般病床: ' + row.normalBed);
+                    if (row.icuBed !== undefined && row.icuBed !== '') info.push('加護病床: ' + row.icuBed);
+                    
+                }
 
                 // If shelter-specific fields exist, show them
                 function yn(val){
