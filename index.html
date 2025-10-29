@@ -86,7 +86,7 @@
 
 <body>
     <div id="mainChart">
-        <div class="map-title">Weather Stations Map</div>
+        <div class="map-title">避難資源地圖</div>
     </div>
 
     <div style="flex: 1; display: flex; flex-direction: column; background: #f5f5f7; padding: 10px;">
@@ -170,12 +170,30 @@
                     .setLngLat([lng, lat])
                     .addTo(map);
 
-                const title = row.name || "避難所" || row.address || label;
+                const title = row.name || row.name || row.address || label;
                 const info = [];
                 info.push('類型: ' + label);
                 if (row.address) info.push('地址: ' + row.address);
                 if (row.phone || row.call) info.push('電話: ' + (row.phone || row.call));
                 if (row.openingHour) info.push('營業/開放: ' + row.openingHour);
+
+                // If shelter-specific fields exist, show them
+                function yn(val){
+                    if (!val) return '-';
+                    const v = String(val).trim().toUpperCase();
+                    if (v === 'Y' || v === 'YES' || v === 'TRUE' || v === '可') return '可';
+                    if (v === 'N' || v === 'NO' || v === 'FALSE' || v === '否') return '否';
+                    return val;
+                }
+
+                if ('forFlooding' in row || 'forFlooding' in row) {
+                    // prefer forFlooding field if present
+                    if (row.forFlooding !== undefined) info.push('水災避難: ' + yn(row.forFlooding));
+                }
+                if (row.forEarthquake !== undefined) info.push('地震避難: ' + yn(row.forEarthquake));
+                if (row.forMudslide !== undefined) info.push('土石流避難: ' + yn(row.forMudslide));
+                if (row.forTsunami !== undefined) info.push('海嘯避難: ' + yn(row.forTsunami));
+                if (row.people !== undefined && row.people !== '') info.push('容納人數: ' + row.people);
 
                 const popupHtml = `<div style="font-size:13px"><div style="font-weight:700;color:${color};margin-bottom:4px">${title}</div>${info.join('<br>')}</div>`;
                 marker.setPopup(new mapboxgl.Popup({ offset: 12 }).setHTML(popupHtml));
