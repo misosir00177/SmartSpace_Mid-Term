@@ -47,14 +47,19 @@
     #rightUpChart { height: 340px; margin-bottom: 20px; }
         #rightDown { flex: 1; }
     /* give the medical chart a stable height so ECharts can initialize visibly */
-    #rightDown-chart { height: 320px; }
+    #rightDown-chart { height: 250px; }
         #rightDown {
             display: flex;
             gap: 10px;
             align-items: stretch;
+            flex: 1;
+            
+            border-radius: 12px;
+            background-color: #ffffff;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
         }
 
-        #rightDown-left, #rightDown-right {
+        #rightDown-right{
             flex: 1;
             height: 100%;
             border-radius: 12px;
@@ -76,6 +81,12 @@
             background-color: rgba(0,0,0,0.2);
             border-radius: 4px;
         }
+
+        /* shelter list item styling */
+        .shelter-item { padding:8px;border-bottom:1px solid #f0f4f8;cursor:pointer;background:transparent; }
+        .shelter-item .name { font-weight:700 }
+        .shelter-item .meta { font-size:12px;color:#666 }
+        .shelter-item.selected { background: linear-gradient(90deg, rgba(47,160,26,0.06), rgba(47,160,26,0.03)); border-left:4px solid #2ca02c; }
 
         .map-title {
             position: absolute;
@@ -179,7 +190,7 @@
         <div id="panel-charts" class="panel active">
             <div id="rightUpChart"></div>
             <div id="rightDown" style="display:flex;gap:10px;">
-                <div id="rightDown-chart" style="flex:1;padding:12px;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"></div>
+                <div id="rightDown-chart" style="flex:1;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"></div>
             </div>
         </div>
 
@@ -632,6 +643,17 @@
             const name = row.name || row.number || row.address || '避難所';
             console.debug('showShelterDetails for', name);
             try {
+                // set selection key so the right-side list highlights this item
+                try {
+                    window.selectedShelterKey = (function(r){
+                        if(!r) return null;
+                        return String(r.id || r.name || r.number || r.address || '').trim();
+                    })(row);
+                    // re-render list to update selection highlight
+                    try{ renderShelterList(); }catch(e){}
+                } catch(e){}
+            } catch(e){}
+            try {
                 if (marker) {
                     marker.togglePopup();
                     const lnglat = marker.getLngLat();
@@ -646,17 +668,22 @@
             if (!container) return;
             const data = dataStore.shelter.slice().map(d=>d);
 
+            // Preserve the previous scroll position of the shelter list (if exists)
+            const prevList = document.getElementById('shelter-list');
+            const prevScroll = prevList ? prevList.scrollTop : 0;
+
             // build controls
             container.innerHTML = `
                 <div style="font-weight:700;color:#F39C12;margin-bottom:6px">避難所列表（依容納人數）</div>
                 <div style="margin-bottom:6px"><input id="shelter-search" placeholder="搜尋名稱或地址" style="width:60%;padding:6px;border:1px solid #e6eef6;border-radius:6px" /> <label style="margin-left:6px"><input id="filter-flood" type="checkbox"> 只顯示支援水災</label></div>
-                <div id="shelter-list" style="max-height:220px;overflow:auto;padding-right:6px"></div>
+                <div id="shelter-list" style="max-height:130px;overflow:auto;padding-right:6px"></div>
             `;
 
             const listEl = document.getElementById('shelter-list');
             const searchEl = document.getElementById('shelter-search');
             const filterFlood = document.getElementById('filter-flood');
 
+            let restoreAfterRender = true; // restore scroll only for the initial re-render to preserve position when selecting
             function renderList() {
                 const q = (searchEl.value||'').trim().toLowerCase();
                 const onlyFlood = filterFlood.checked;
@@ -676,22 +703,31 @@
                 listEl.innerHTML = '';
                 filtered.forEach(item => {
                     const name = item.row.name || item.row.number || (item.row.address?item.row.address.split(',')[0]:'避難所');
+                    const key = String(item.row.id || item.row.name || item.row.number || item.row.address || '').trim();
                     const li = document.createElement('div');
-                    li.style.padding = '8px';
-                    li.style.borderBottom = '1px solid #f0f4f8';
-                    li.style.cursor = 'pointer';
-                    li.innerHTML = `<div style="font-weight:700">${name}</div><div style="font-size:12px;color:#666">容納: ${item.people}</div>`;
+                    li.className = 'shelter-item';
+                    if(window.selectedShelterKey && window.selectedShelterKey === key) li.classList.add('selected');
+                    li.setAttribute('data-key', key);
+                    li.innerHTML = `<div class="name">${name}</div><div class="meta">容納: ${item.people}</div>`;
                     li.addEventListener('click', ()=>{
+                        // set selected key and re-render to update highlight
+                        window.selectedShelterKey = key;
+                        try{ renderShelterList(); }catch(e){}
                         showShelterDetails(item.row, item.marker);
                         try { updateComparisonChart(item.row); } catch(e){console.warn(e)}
                     });
                     listEl.appendChild(li);
                 });
+
+                // restore previous scroll position if requested (only for the initial re-render that replaced the container)
+                try{ if (restoreAfterRender && listEl) { listEl.scrollTop = prevScroll; } }catch(e){}
             }
 
             searchEl.addEventListener('input', renderList);
             filterFlood.addEventListener('change', renderList);
+            // initial render: restore scroll once after this call
             renderList();
+            restoreAfterRender = false;
         }
 
         // Setup layer toggle buttons that show/hide marker groups and update icon appearance
