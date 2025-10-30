@@ -35,6 +35,7 @@
             flex: 1.6;
             height: 100%;
             border-right: 2px solid #e0e0e0;
+            position: relative; /* allow absolute-positioned controls inside map */
         }
 
         #rightUpChart, #rightDown {
@@ -42,13 +43,15 @@
             padding: 10px;
         }
 
-        /* give more vertical room to the top chart and allow the bottom panel to expand */
-        #rightUpChart { height: 260px; }
+    /* give more vertical room to the top chart and allow the bottom panel to expand */
+    #rightUpChart { height: 340px; margin-bottom: 20px; }
         #rightDown { flex: 1; }
-        #rightDown-chart { height: 100%; }
+    /* give the medical chart a stable height so ECharts can initialize visibly */
+    #rightDown-chart { height: 320px; }
         #rightDown {
             display: flex;
             gap: 10px;
+            align-items: stretch;
         }
 
         #rightDown-left, #rightDown-right {
@@ -86,27 +89,108 @@
             font-size: 16px;
             box-shadow: 0 2px 6px rgba(0,0,0,0.1);
         }
+        /* Floating controls positioned on the map's right-bottom corner */
+        .map-controls { 
+            position: absolute;
+            right: 16px;
+            bottom: 16px;
+            background: #fff;
+            padding: 10px 12px;
+            border-radius: 10px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+            z-index: 6;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            min-width: 160px;
+        }
+        .map-controls .title { font-weight:700;color:#2b6ea3;margin-right:6px }
+        /* layer toggle icon buttons */
+        .layer-toggle {
+            display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;border:1px solid #eef6fb;background:#fff;cursor:pointer;font-size:13px;color:#2b6ea3;
+        }
+        .layer-toggle .dot{width:16px;height:16px;border-radius:50%;display:inline-block;flex:0 0 16px}
+        .layer-toggle[data-layer="shelter"] .dot{background:#2ca02c}
+        .layer-toggle[data-layer="med"] .dot{background:#A41623}
+        .layer-toggle[data-layer="water"] .dot{background:#1f77b4}
+        .layer-toggle.off{filter:grayscale(100%) opacity(.45);color:#7a8b94}
+        /* Tabs for right-side panels */
+        .right-tabs {
+            display: flex;
+            gap: 6px;
+            padding: 6px 10px;
+            align-items: center;
+        }
+        .right-tabs button {
+            background: transparent;
+            border: 1px solid #e6eef6;
+            padding: 6px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            color: #2b6ea3;
+            font-weight: 600;
+        }
+        .right-tabs button.active {
+            background: linear-gradient(90deg,#ffd9b3,#ffcc99);
+            border-color: #ffb366;
+            color: #7a3500;
+        }
+        /* Panel containers for tab content */
+        .panel { display: none; }
+        .panel.active { display: block; }
+    #shelterPie { height: 420px; width: 100%; }
+
+    /* make panel content breathe a little more */
+    #panel-charts { padding: 8px 6px; }
+    #panel-stats { padding: 8px 6px; }
     </style>
 </head>
 
 <body>
     <div id="mainChart">
         <div class="map-title">避難資源地圖</div>
+        <div class="map-controls" aria-hidden="false">
+            <div class="title">避難資訊地圖</div>
+            <button class="layer-toggle" data-layer="shelter" title="避難所" aria-pressed="true">
+                <span class="dot"></span>
+                <span class="label">避難所</span>
+            </button>
+            <button class="layer-toggle" data-layer="med" title="醫療院所" aria-pressed="true">
+                <span class="dot"></span>
+                <span class="label">醫療</span>
+            </button>
+            <button class="layer-toggle" data-layer="water" title="飲水機" aria-pressed="true">
+                <span class="dot"></span>
+                <span class="label">飲水</span>
+            </button>
+        </div>
     </div>
 
     <div style="flex: 1; display: flex; flex-direction: column; background: #f5f5f7; padding: 10px; gap:10px;">
-        <div style="padding:8px 12px;">
-            <h2 style="margin:0 0 8px 0;color:#2b6ea3;font-size:18px">避難資訊地圖</h2>
-            <label style="margin-right:10px"><input id="toggle-water" type="checkbox" checked> 飲水機</label>
-            <label style="margin-right:10px"><input id="toggle-shelter" type="checkbox" checked> 避難所</label>
-            <label style="margin-right:10px"><input id="toggle-med" type="checkbox" checked> 醫療院所</label>
-            <hr style="margin-top:8px;border:none;border-top:1px solid #e6eef6">
+
+        <!-- Tabs to switch between Charts and Statistics -->
+        <div class="right-tabs">
+            <button data-tab="charts" class="active">綜合統計</button>
+            <button data-tab="stats">避難所資訊</button>
         </div>
 
-        <div id="rightUpChart"></div>
+        <!-- Panel: Charts (existing layout) -->
+        <div id="panel-charts" class="panel active">
+            <div id="rightUpChart"></div>
+            <div id="rightDown" style="display:flex;gap:10px;">
+                <div id="rightDown-chart" style="flex:1;padding:12px;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"></div>
+            </div>
+        </div>
 
-        <div id="rightDown" style="display:flex;padding: 0px;">
-            <div id="rightDown-chart" style="flex:1;background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.04)"></div>
+        <!-- Panel: Statistics (pie chart) -->
+        <div id="panel-stats" class="panel">
+            <div style="background:#fff;border-radius:10px;padding:12px;box-shadow:0 2px 8px rgba(0,0,0,0.04);display:flex;flex-direction:column;gap:12px">
+                <div style="font-weight:700;color:#F39C12;margin-bottom:8px">避難所類型統計</div>
+                <div id="shelterPie" style="width:100%;height:320px"></div>
+                <div style="font-size:12px;color:#666">註：每類別顯示可支援該災害類型的避難所數量（避難所可同時支援多種災害）。</div>
+                <div id="rightDown-right" style="width:100%;height:100px;padding:0px;overflow:auto;background:#fff;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,0.04)"></div>
+            </div>
         </div>
     </div>
 
@@ -399,6 +483,8 @@
                                 setupLayerToggles();
                                 // render shelter list (uses dataStore populated by addCSVMarkers)
                                 renderShelterList();
+                                // render statistics pie (counts by disaster type)
+                                try { renderShelterTypePie(); } catch(e){ console.warn('pie render failed', e); }
                             } catch (e) { console.error('Error rendering right panel', e); }
                 }).catch(err => console.error('CSV load error', err));
             });
@@ -417,16 +503,18 @@
 
                     // initialize top chart and save reference globally for updates
                     window.charts = window.charts || {};
-                    const upChart = echarts.init(document.getElementById('rightUpChart'));
-                    window.charts.upChart = upChart;
-                const upOption = {
-                    title: { text: '避難所收容人數', left: 'center', textStyle: { color: '#A41623' } },
-                    tooltip: {},
-                    xAxis: { type: 'category', data: parsed.map(p => p.name), axisLabel: { rotate: 30 } },
-                    yAxis: { type: 'value' },
-                    series: [{ type: 'bar', data: parsed.map(p => p.people), itemStyle: { color: '#FFB081' } }]
-                };
-                upChart.setOption(upOption);
+                        const upChart = echarts.init(document.getElementById('rightUpChart'));
+                        window.charts.upChart = upChart;
+                    // use top 6 shelters for the default view
+                    const parsed = (window._shelterChartData || []).slice(0,6);
+                    const upOption = {
+                        title: { text: '避難所收容人數', left: 'center', textStyle: { color: '#A41623' } },
+                        tooltip: {},
+                        xAxis: { type: 'category', data: parsed.map(p => p.name), axisLabel: { rotate: 30 } },
+                        yAxis: { type: 'value' },
+                        series: [{ type: 'bar', data: parsed.map(p => p.people), itemStyle: { color: '#FFB081' } }]
+                    };
+                    upChart.setOption(upOption);
             } catch (e) { console.warn('shelter chart error', e); }
 
             // Middle status panel removed — no inline status card. Keep console info for debugging.
@@ -444,7 +532,8 @@
                 const medOption = {
                     title: { text: '醫療院所病床數', left: 'center', textStyle:{ color:'#A41623' } },
                     tooltip: { },
-                    legend: { data: ['一般病床','加護病床'], bottom: 0 },
+                    // place legend centered below the chart to avoid overlapping with bars
+                    legend: { data: ['一般病床','加護病床'], bottom: 8, left: 'center' },
                     xAxis: { type: 'category', data: medParsed.map(m=>m.name), axisLabel:{rotate:30} },
                     yAxis: { type: 'value' },
                     series: [
@@ -453,6 +542,9 @@
                     ]
                 };
                 medChart.setOption(medOption);
+                // keep a global reference so we can resize it when tabs change
+                window.charts = window.charts || {};
+                window.charts.medChart = medChart;
             } catch(e){ console.warn('medical chart error', e); }
 
             // When charts are first rendered, ensure the top chart shows default ordering
@@ -602,27 +694,100 @@
             renderList();
         }
 
-        // Setup checkbox toggles to show/hide marker groups
+        // Setup layer toggle buttons that show/hide marker groups and update icon appearance
         function setupLayerToggles(){
-            const toggle = (id, key)=>{
-                const cb = document.getElementById(id);
-                if(!cb) return;
-                cb.addEventListener('change', ()=>{
-                    const visible = cb.checked;
-                    markerStore[key].forEach(m=>{
-                        try{
-                            if(visible) m.addTo(map); else m.remove();
-                        }catch(e){console.warn('marker toggle error',e)}
-                    });
+            // helper: show/hide markers by key
+            function setLayerVisible(key, visible){
+                (markerStore[key]||[]).forEach(m=>{
+                    try{ if(visible) m.addTo(map); else m.remove(); }catch(e){console.warn('marker toggle error',e)}
                 });
-            };
-            toggle('toggle-water','water');
-            toggle('toggle-shelter','shelter');
-            toggle('toggle-med','med');
+            }
+
+            // wire up buttons with .layer-toggle
+            const buttons = document.querySelectorAll('.layer-toggle');
+            buttons.forEach(btn => {
+                const key = btn.getAttribute('data-layer');
+                if(!key) return;
+                // initial state: pressed -> visible
+                const pressed = btn.getAttribute('aria-pressed') !== 'false';
+                if(!pressed) btn.classList.add('off');
+                setLayerVisible(key, pressed);
+
+                btn.addEventListener('click', ()=>{
+                    const cur = btn.getAttribute('aria-pressed') === 'true';
+                    const next = !cur;
+                    btn.setAttribute('aria-pressed', String(next));
+                    btn.classList.toggle('off', !next);
+                    setLayerVisible(key, next);
+                });
+            });
         }
 
-        // Initialize map and plotting when page loads
-        document.addEventListener('DOMContentLoaded', createMapAndPlotCSV);
+        // Wire the static tabs + panels that exist in the HTML
+        function setupTabs(){
+            try{
+                var tabWrap = document.querySelector('.right-tabs');
+                if(!tabWrap) return;
+                var buttons = tabWrap.querySelectorAll('button');
+                buttons.forEach(function(b){
+                    b.addEventListener('click', function(){
+                        buttons.forEach(function(x){ x.classList.remove('active'); });
+                        b.classList.add('active');
+                        var t = b.getAttribute('data-tab');
+                        document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
+                        var target = document.getElementById('panel-'+t);
+                        if (target) target.classList.add('active');
+                        // resize charts after a short delay so containers are visible
+                        setTimeout(function(){
+                            try{ if(window.charts && window.charts.upChart) window.charts.upChart.resize(); }catch(e){}
+                            try{ if(window.charts && window.charts.medChart) window.charts.medChart.resize(); }catch(e){}
+                            try{ if(window._shelterPie) window._shelterPie.resize(); }catch(e){}
+                        }, 250);
+                    });
+                });
+            }catch(e){ console.warn('setupTabs error', e); }
+        }
+
+        // Small helper to evaluate truthy 'Y' variants
+        function globalIsYes(v){ if(v===undefined||v===null) return false; const s=String(v).trim().toUpperCase(); return s==='Y'||s==='YES'||s==='TRUE'||s==='可'; }
+
+        // Render pie chart counting shelters by supported disaster types
+        function renderShelterTypePie(){
+            try{
+                const counts = { 水災:0, 地震:0, 土石流:0, 海嘯:0 };
+                (dataStore.shelter||[]).forEach(d=>{
+                    const r = d.row || {};
+                    if (globalIsYes(r.forFlooding)) counts.水災++;
+                    if (globalIsYes(r.forEarthquake)) counts.地震++;
+                    if (globalIsYes(r.forMudslide)) counts.土石流++;
+                    if (globalIsYes(r.forTsunami)) counts.海嘯++;
+                });
+                const pieData = Object.keys(counts).map(k=>({ name:k, value: counts[k] }));
+                // init chart
+                const el = document.getElementById('shelterPie');
+                if(!el) return;
+                window._shelterPie = window._shelterPie || echarts.init(el);
+                const option = {
+                    tooltip: { trigger: 'item' },
+                    legend: { orient: 'vertical', left: 'left' },
+                    series: [{
+                        name: '避難所數量',
+                        type: 'pie',
+                        radius: ['40%', '70%'],
+                        avoidLabelOverlap: false,
+                        itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+                        label: { show: false, position: 'center' },
+                        emphasis: { label: { show: true, fontSize: '16', fontWeight: 'bold' } },
+                        labelLine: { show: false },
+                        data: pieData
+                    }]
+                };
+                window._shelterPie.setOption(option);
+            }catch(e){ console.warn('renderShelterTypePie error', e); }
+        }
+
+    // Initialize map and plotting when page loads
+    document.addEventListener('DOMContentLoaded', ()=>{ setupTabs(); createMapAndPlotCSV(); });
     </script>
 </body>
 </html>
